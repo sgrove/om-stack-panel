@@ -1,4 +1,4 @@
-(ns om-stack-panel.stack-panel
+(ns om-stack-panel.fixed-height-stack-panel
   (:require [cljs.core.async :as async :refer [>! <! alts! chan sliding-buffer put! close!]]
             [om.core :as om]
             [om.dom :as dom]
@@ -19,15 +19,6 @@
     (render [_]
       (om/build (:item entry-data) (:item-data entry-data) {:opts (:item-options entry-data)}))))
 
-(defn recalc-offsets [all-heights]
-  (reduce (fn [heights [new-height _]]
-            (let [last-offset (peek (peek heights))
-                  last-height (first (last heights))
-                  curr-offset (+ last-offset last-height)]
-              (if (empty? heights)
-                [[new-height 0]]
-                (conj heights [new-height curr-offset])))) [] all-heights))
-
 (defn scroll-threshold? [vp-top top-threshold bottom-threshold vp-height percent-trigger & [absolute-bottom]]
   "If the (< (- VP-TOP TOP-THRESHOLD) PERCENT-TRIGGER) of VP-HEIGHT,
    trigger a rerender. Same for VP-BOTTOM (calculated from the last rendered element)."
@@ -38,7 +29,7 @@
         (< (- bottom-threshold vp-bottom) px-trigger))))
 
 ;; Currently invoked in main_area.cljs
-(defn stack-panel [panel-data owner opts]
+(defn fixed-stack-panel [panel-data owner opts]
   (reify
     om/IWillMount
     (will-mount [_]
@@ -56,12 +47,6 @@
             entry-count       (count (:items panel-data))]
         (om/set-state! owner :pc-comm pc-ch)
         (om/set-state! owner :panel-entry-comm panel-ch)
-        (om/set-state! owner :panel-entry-heights (recalc-offsets (vec (repeat entry-count [height-best-guess 0]))))
-        ;; Recalc heights/offsets on render for variable-heights
-        (go (while true
-              (let [[index height] (<! panel-ch)]
-                (let [heights (om/get-state owner :panel-entry-heights)]
-                  (om/set-state! owner :panel-entry-heights (recalc-offsets (assoc-in heights [index 0] height)))))))
         ;; Catch scroll events in child scroll-view, update scroll-position locally
         (go (while true
               (let [[msg val] (<! pc-ch)]
@@ -95,26 +80,28 @@
             overdraw-factor  (or (:overdraw-factor opts) 2)
             ;; Current estimates on height/offset
             ;; [[item-height item-offset] [... ...]]
-            heights (om/get-state owner :panel-entry-heights)
             ;; Visible center of the element
             el-center (+ vp-scroll-offset (/ vp-height 2))
             ;; Determine virtual render bounds
             offset-threshold (* vp-height overdraw-factor)
             top-threshold    (- el-center offset-threshold)
             bottom-threshold (+ el-center offset-threshold)
-            [top-el-idx top-el-off] (or (last (keep-indexed (fn [i [h o]] (when (< o top-threshold) [i o])) heights))
-                                        [0 0])
-            [btm-el-idx btm-el-ht btm-el-off] (last (keep-indexed (fn [i [h o]] (when (< o bottom-threshold) [i h o])) heights))
+
+            top-el-idx (js/Math.floor (/ top-threshold item-height))
+            btm-el-idx (js/Math.floor (/ bottom-threshold item-height))
+
+            top-el-off top-threshold
+            btm-el-off bottom-threshold
             M (- btm-el-idx top-el-idx)
             N top-el-idx ;; Draw half above, and half below
             comm (om/get-state owner :panel-entry-comm)
             ;; Render panel-entry, which renders item for us
-            render-item (fn [[idx com-data [height offset]]]
+            render-item (fn [[idx com-data]]
                           (dom/div
-                           #js {:key offset
+                           #js {:key idx
                                 :style #js {:position "absolute"
                                             :left 0
-                                            :top offset
+                                            :top (* idx item-height)
                                             :width "100%"
                                             :font-decoration "bold"}}
                            (om/build panel-entry
@@ -123,15 +110,17 @@
                                       :item-options item-options}
                                      {:opts {:index idx
                                              :comm comm}})))
-            idx-data-offset (map vector (range) items heights)]
+            idx-data-offset (map vector (range) items)]
         ;; Store the boundaries of what we'll rendered, iff
         ;; they're different from what's already stored (to
         ;; prevent continual rerendering)
-        (when (or (not= (om/get-state owner :overdraw-top) top-el-off)
-                  (not= (om/get-state owner :overdraw-bottom) (+ btm-el-ht btm-el-off)))
+        (when (or (not= (om/get-state owner :overdraw-top) (- top-threshold item-height))
+                  (not= (om/get-state owner :overdraw-bottom) (+ bottom-threshold item-height)))
+          (print "(not= " (om/get-state owner :overdraw-top) " " (- top-threshold item-height) ")")
+          (print "(not= " (om/get-state owner :overdraw-bottom) " " (- bottom-threshold item-height) ")")
           (print "Rendering boundaries changed, updating")
-          (om/set-state! owner :overdraw-top top-el-off)
-          (om/set-state! owner :overdraw-bottom (+ btm-el-ht btm-el-off)))
+          (om/set-state! owner :overdraw-top (- top-threshold item-height))
+          (om/set-state! owner :overdraw-bottom (+ bottom-threshold item-height)))
         (om/build scroll-view/scroll-view (om/graft {:vp-class vp-class
                                           :vp-height vp-height
                                           :user-vp-style user-vp-style
