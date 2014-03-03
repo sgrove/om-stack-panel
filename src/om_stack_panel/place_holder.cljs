@@ -21,5 +21,5 @@
 
 (defn rand-place-holder-setting [counter]
   {:counter          counter
-   :height           (+ (rand-int 100) 50)
+   :height           65
    :background-color (rand-nth colors)})
