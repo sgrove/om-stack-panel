@@ -25,7 +25,7 @@
     (render [_]
       (let [{:keys
              [vp-class   vp-oversized-child
-              vp-height  vp-class user-vp-style
+              vp-height  user-vp-style
               render-fn  items]} data
             vp-style (clj->js (merge default-vp-style
                                      {:height vp-height
