@@ -49,9 +49,9 @@
       (let [;; Channel for children to notify when they've rendered
             ;; (so we can recalc their y-offset with their actual
             ;; height)
-            panel-ch          (chan)
+            panel-ch          (chan (async/sliding-buffer 100))
             ;; Parent<->child channel between StackPanel and ScrollView
-            pc-ch             (chan)
+            pc-ch             (chan (async/sliding-buffer 1))
             height-best-guess (:item-height-best-guess opts)
             entry-count       (count (:items panel-data))]
         (om/set-state! owner :pc-comm pc-ch)
